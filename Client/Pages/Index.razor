@@ -1,0 +1,92 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Net.Http
+@inject HttpClient Http
+@using RealTimeChat.Shared.Models
+@using RealTimeChat.Shared
+@inject NavigationManager NavigationManager
+
+<h1>Hello, world!</h1>
+
+<br />
+<h4>Chats</h4>
+<hr />
+<input type="text" @bind="@messageText" />
+<button @onclick="(async ()=> await SendMessage())" disabled="@(!isConnected)">Send</button>
+@if (sentmessage != null) { <p>@sentmessage.BodyText</p>  }
+@if (errorMessage != null) { <p>@errorMessage</p>  }
+<hr />
+<ul>
+    @foreach (var m in messages)
+    {
+        <li>@m.BodyText</li>
+    }
+</ul>
+
+
+@code{
+    private HubConnection hubConnection;
+    private List<Message> messages = new List<Message>();
+
+    string messageText { get; set; }
+
+    Message message;
+    Message sentmessage;
+    string errorMessage;
+
+    private List<Message> previousMessages = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/SupplierChatHub"))
+            .Build();
+
+        hubConnection.On<Message>("ReceiveMessage", (m) =>
+        {
+            var encoding = m;
+            messages.Add(encoding);
+            StateHasChanged();
+        });
+        await hubConnection.StartAsync();
+
+        previousMessages = await Http.GetFromJsonAsync<List<Message>>("/api/Messages/");
+
+        if (previousMessages != null)
+        {
+            foreach (var prevMessage in previousMessages)
+            {
+                messages.Add(prevMessage);
+            }
+        }
+    }
+
+    async Task SendMessage()
+    {
+        message = new Message()
+        {
+            BodyText = messageText,
+            SentAt = DateTime.Now,
+            ReadAt = Convert.ToDateTime("1649/01/01")
+        };
+
+        var result = await Http.PostAsJsonAsync("/api/Messages/", message);
+        if (!result.IsSuccessStatusCode)
+        {
+            // set error message for display, log to console and return
+            errorMessage = result.ReasonPhrase;
+            Console.WriteLine($"There was an error! {errorMessage}");
+            return;
+        }
+        sentmessage = await result.Content.ReadFromJsonAsync<Message>();
+
+    }
+
+    public bool isConnected =>
+        hubConnection.State == HubConnectionState.Connected;
+
+    public void Dispose()
+    {
+        _ = hubConnection.DisposeAsync();
+    }
+}
